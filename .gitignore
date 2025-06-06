@@ -1,0 +1,22 @@
+# Dependências
+/node_modules
+/.pnpm-store/ # Se você usa pnpm
+
+# Build artifacts
+/dist
+/build # Para o caso de usar create-react-app no futuro
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env.local
+.env*.local
+.DS_Store # macOS
+npm-debug.log # For Windows
+yarn-debug.log # For Windows
+.idea/ # WebStorm / IntelliJ
+.vscode/ # VSCode 
+.vscode/*.log
+.vscode/*.csv
+.vscode/.history
