@@ -1,124 +1,199 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
-import localforage from "localforage"; // Para simular armazenamento de token
+import localforage from "localforage"; // Para persistência local do token (ainda útil)
+import axios from "axios"; // <-- Importar Axios
 
-// 1. Criação do Contexto
+// 1. Criação do Contexto de Autenticação
 const AuthContext = createContext();
 
 // 2. Provedor de Autenticação
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null); // Armazena informações do usuário logado (ex: { id: '1', username: 'Matheus' })
-  const [token, setToken] = useState(null); // Armazena o token de autenticação
-  const [isLoading, setIsLoading] = useState(true); // Para verificar se já tentamos carregar o token
+  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Efeito para carregar o token e o usuário do armazenamento local ao iniciar a aplicação
+  // --- CONFIGURAÇÃO DA URL BASE DO BACKEND ---
+  // Converse com seu amigo do back-end para obter a URL correta do servidor dele.
+  // Pode ser algo como 'http://localhost:3001' ou 'https://api.seuservidor.com'
+  const API_BASE_URL = "http://localhost:3001"; // <-- ALtere ESTA URL para a do seu backend!
+
+  // Função auxiliar para configurar o Axios com o token
+  const axiosInstance = axios.create({
+    baseURL: API_BASE_URL,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  // Interceptor para adicionar o token JWT a cada requisição, se existir
+  axiosInstance.interceptors.request.use(
+    (config) => {
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+      return config;
+    },
+    (error) => {
+      return Promise.reject(error);
+    }
+  );
+
+  // Efeito para carregar o token do armazenamento local e validar com o backend ao iniciar
   useEffect(() => {
     const loadAuthData = async () => {
       try {
         const storedToken = await localforage.getItem("authToken");
         if (storedToken) {
           setToken(storedToken);
-          // Em uma aplicação real, você faria uma requisição para o backend
-          // para validar o token e obter os dados do usuário.
-          // Por simplicidade aqui, vamos simular que o token indica um usuário logado.
-          // Você pode decodificar o JWT aqui para pegar o username, se for o caso.
-          setUser({ username: "Usuário Teste" }); // Simulando um usuário logado
+          // Tenta validar o token com o backend para obter os dados reais do usuário
+          const response = await axiosInstance.get("/api/auth/me", {
+            headers: {
+              Authorization: `Bearer ${storedToken}`, // Envia o token para validação
+            },
+          });
+          setUser(response.data.user); // Assume que o backend retorna { user: { id, username, email } }
         }
       } catch (error) {
-        console.error("Erro ao carregar dados de autenticação:", error);
+        console.error("Erro ao carregar/validar dados de autenticação:", error);
+        // Se o token for inválido/expirado ou houver erro, limpa o token e força logout
+        await localforage.removeItem("authToken");
+        setToken(null);
+        setUser(null);
       } finally {
         setIsLoading(false);
       }
     };
     loadAuthData();
-  }, []);
+  }, []); // Dependência vazia: roda apenas uma vez na montagem
 
   // Função de Login
   const login = async (username, password) => {
-    // Aqui você faria a chamada para o backend para autenticar
-    // Ex: const response = await axios.post('/api/login', { username, password });
-    // const fetchedToken = response.data.token;
-    // const userData = response.data.user;
+    try {
+      const response = await axiosInstance.post("/api/auth/login", {
+        username,
+        password,
+      });
+      const { token: fetchedToken, user: userData } = response.data; // Assume que o backend retorna 'token' e 'user'
 
-    // SIMULAÇÃO DE LOGIN BEM SUCEDIDO
-    if (username === "test" && password === "123") {
-      const fetchedToken = "fake-jwt-token-123"; // Token de exemplo
       await localforage.setItem("authToken", fetchedToken);
       setToken(fetchedToken);
-      setUser({ id: "1", username: username });
+      setUser(userData);
       return { success: true };
-    } else {
-      return { success: false, message: "Usuário ou senha inválidos" };
+    } catch (error) {
+      console.error(
+        "Erro no login:",
+        error.response?.data?.message || error.message
+      );
+      return {
+        success: false,
+        message:
+          error.response?.data?.message ||
+          "Falha no login. Verifique suas credenciais.",
+      };
     }
   };
 
   // Função de Logout
   const logout = async () => {
-    await localforage.removeItem("authToken");
-    setToken(null);
-    setUser(null);
+    try {
+      // Opcional: Se o backend tiver um endpoint para invalidar tokens no servidor
+      // await axiosInstance.post('/api/auth/logout');
+    } catch (error) {
+      console.warn(
+        "Erro ao tentar logout no backend (token já pode estar inválido):",
+        error
+      );
+    } finally {
+      await localforage.removeItem("authToken");
+      setToken(null);
+      setUser(null);
+    }
   };
 
   // Função de Registro (Create - Usuário)
   const register = async (username, password) => {
-    // Aqui você faria a chamada para o backend para registrar o usuário
-    // Ex: const response = await axios.post('/api/register', { username, password });
-    // if (response.status === 201) { ... }
-
-    // SIMULAÇÃO DE REGISTRO BEM SUCEDIDO
-    if (username && password) {
-      // Em uma aplicação real, você não armazenaria a senha no front-end.
-      // Apenas simula que o registro cria uma conta.
-      console.log("Usuário registrado:", username, "Senha:", password);
-      return { success: true, message: "Usuário registrado com sucesso!" };
-    } else {
-      return { success: false, message: "Preencha todos os campos." };
+    try {
+      const response = await axiosInstance.post("/api/auth/register", {
+        username,
+        password,
+      });
+      return {
+        success: true,
+        message:
+          response.data.message ||
+          "Usuário registrado com sucesso! Por favor, faça login.",
+      };
+    } catch (error) {
+      console.error(
+        "Erro no registro:",
+        error.response?.data?.message || error.message
+      );
+      return {
+        success: false,
+        message:
+          error.response?.data?.message ||
+          "Falha no registro. Tente novamente.",
+      };
     }
   };
 
   // Função de Update (Alterar Senha/Dados)
   const updateUser = async (currentPassword, newPassword, newUsername) => {
-    // Aqui você faria a chamada para o backend para atualizar os dados do usuário
-    // Ex: const response = await axios.put('/api/users/me', { currentPassword, newPassword, newUsername }, { headers: { Authorization: `Bearer ${token}` } });
+    try {
+      // Os dados enviados devem corresponder ao que o backend espera
+      const updateData = { currentPassword };
+      if (newPassword) {
+        updateData.newPassword = newPassword;
+      }
+      if (newUsername) {
+        updateData.username = newUsername; // Supondo que o backend espera 'username' para alteração
+      }
 
-    // SIMULAÇÃO DE UPDATE BEM SUCEDIDO
-    if (token && user) {
-      if (currentPassword === "123") {
-        // Simula validação da senha atual
+      const response = await axiosInstance.put("/api/users/me", updateData);
+
+      // Assume que o backend retorna os dados atualizados do usuário ou uma mensagem
+      if (response.data.user) {
+        setUser(response.data.user); // Atualiza o estado do usuário com os novos dados
+      } else {
         setUser((prevUser) => ({
           ...prevUser,
           username: newUsername || prevUser.username,
-        }));
-        console.log(
-          "Dados do usuário atualizados. Nova senha (apenas simulação):",
-          newPassword
-        );
-        return { success: true, message: "Dados atualizados com sucesso!" };
-      } else {
-        return { success: false, message: "Senha atual incorreta." };
+        })); // Se o backend não retornar user completo
       }
+      return {
+        success: true,
+        message: response.data.message || "Dados atualizados com sucesso!",
+      };
+    } catch (error) {
+      console.error(
+        "Erro na atualização:",
+        error.response?.data?.message || error.message
+      );
+      return {
+        success: false,
+        message:
+          error.response?.data?.message || "Falha na atualização do perfil.",
+      };
     }
-    return { success: false, message: "Não autenticado." };
   };
 
   // Função de Delete (Deletar Conta)
   const deleteUser = async (password) => {
-    // Aqui você faria a chamada para o backend para deletar o usuário
-    // Ex: const response = await axios.delete('/api/users/me', { data: { password }, headers: { Authorization: `Bearer ${token}` } });
-
-    // SIMULAÇÃO DE DELETE BEM SUCEDIDO
-    if (token && user) {
-      if (password === "123") {
-        // Simula validação da senha para deletar
-        await logout(); // Desloga o usuário após deletar a conta
-        return { success: true, message: "Conta deletada com sucesso!" };
-      } else {
-        return {
-          success: false,
-          message: "Senha incorreta para deletar a conta.",
-        };
-      }
+    try {
+      await axiosInstance.delete("/api/users/me", { data: { password } }); // DELETE com body requer 'data' no Axios
+      await logout(); // Desloga o usuário após sucesso na exclusão
+      return { success: true, message: "Conta deletada com sucesso!" };
+    } catch (error) {
+      console.error(
+        "Erro ao deletar conta:",
+        error.response?.data?.message || error.message
+      );
+      return {
+        success: false,
+        message:
+          error.response?.data?.message ||
+          "Falha ao deletar a conta. Senha incorreta ou erro no servidor.",
+      };
     }
-    return { success: false, message: "Não autenticado." };
   };
 
   return (
